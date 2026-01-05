@@ -6,6 +6,7 @@ import ExcalidrawCanvas, {
   ExcalidrawCanvasData,
   ExcalidrawCanvasHandle,
 } from './ExcalidrawCanvas'
+import Model3DViewer from './Model3DViewer'
 
 type ChatInterfaceProps = {
   initialCanvasId?: string
@@ -21,6 +22,8 @@ interface ToolCall {
   status: 'executing' | 'done'
   result?: any
   imageUrl?: string
+  modelUrl?: string
+  modelFormat?: 'obj' | 'glb'
 }
 
 interface Message {
@@ -492,6 +495,8 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
                   updateToolStep(event.tool_call_id, (tc) => {
                            let updatedArgs = tc.arguments
                     let imageUrl: string | undefined = tc.imageUrl
+                    let modelUrl: string | undefined = tc.modelUrl
+                    let modelFormat: 'obj' | 'glb' | undefined = tc.modelFormat
                            try {
                              const resultObj = JSON.parse(event.content)
                              if (resultObj && resultObj.prompt && (!updatedArgs || Object.keys(updatedArgs).length === 0)) {
@@ -499,6 +504,11 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
                              }
                       if (resultObj && typeof resultObj.image_url === 'string') {
                         imageUrl = resultObj.image_url
+                             }
+                      // 处理3D模型结果
+                      if (resultObj && typeof resultObj.model_url === 'string') {
+                        modelUrl = resultObj.model_url
+                        modelFormat = (resultObj.format || 'obj') as 'obj' | 'glb'
                              }
                            } catch (e) {
                              // ignore
@@ -509,12 +519,15 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
                              result: event.content,
                       arguments: updatedArgs,
                       imageUrl,
+                      modelUrl,
+                      modelFormat,
                     }
                   })
 
                   if (event.content) {
                     try {
                       const result = JSON.parse(event.content)
+                      // 处理图片结果
                       if (typeof result.image_url === 'string' && result.image_url) {
                         const imgUrl: string = result.image_url
                         
@@ -522,8 +535,26 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
                         await excalidrawRef.current?.addImage({ url: imgUrl })
                         scrollToBottom('auto')
                       }
+                      // 处理3D模型结果
+                      if (typeof result.model_url === 'string' && result.model_url) {
+                        const modelUrl: string = result.model_url
+                        const format = (result.format || 'obj') as 'obj' | 'glb'
+                        const previewUrl = result.preview_url || result.model_url
+                        const mtlUrl = result.mtl_url
+                        const textureUrl = result.texture_url
+                        
+                        // 将预览图添加到画板（作为普通图片元素）
+                        await excalidrawRef.current?.add3DModelPreview({ 
+                          previewUrl, 
+                          modelUrl, 
+                          format,
+                          mtlUrl,
+                          textureUrl
+                        })
+                        scrollToBottom('auto')
+                      }
                     } catch (e) {
-                      console.error('解析图片结果失败', e)
+                      console.error('解析结果失败', e)
                     }
                   }
                   break
@@ -777,9 +808,14 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
       'edit_image': '编辑图像',
       'generate_volcano_image': '生成图像',
       'edit_volcano_image': '编辑图像',
+      'generate_3d_model': '生成3D模型',
     }
     return map[name] || name
   }
+
+  // 3D模型弹框状态
+  const [show3DModal, setShow3DModal] = useState(false)
+  const [current3DModel, setCurrent3DModel] = useState<{ url: string; format: 'obj' | 'glb'; mtlUrl?: string; textureUrl?: string } | null>(null)
 
   // 获取当前画布的图片用于渲染
   const currentCanvas = getCurrentCanvas()
@@ -822,7 +858,7 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
               <div className="canvas-empty">
                 <ImageIcon size={64} strokeWidth={1.5} className="empty-icon" />
                 <p className="empty-title">AI 画板</p>
-                <p className="canvas-hint">生成的图片将自动落到画布上（支持缩放、框选、对齐）</p>
+                <p className="canvas-hint">生成的图片和3D模型将自动落到画布上（支持缩放、框选、对齐）</p>
               </div>
             ) : (
               <div />
@@ -904,10 +940,83 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
                     console.error('处理图片失败:', err)
                     alert('添加图片到输入框失败，请重试')
                   }
-                }}
+                    }}
+                    on3DModelClick={(modelUrl, format, mtlUrl, textureUrl) => {
+                      // 点击3D模型预览图时，打开弹框
+                      // 如果弹框已经打开，不重复打开
+                      if (show3DModal) {
+                        console.log('弹框已打开，忽略重复调用')
+                        return
+                      }
+                      console.log('on3DModelClick 被调用', { modelUrl, format, mtlUrl, textureUrl })
+                      setCurrent3DModel({ url: modelUrl, format, mtlUrl, textureUrl })
+                      setShow3DModal(true)
+                      console.log('弹框状态已更新', { show3DModal: true, current3DModel: { url: modelUrl, format, mtlUrl, textureUrl } })
+                    }}
+                    onModalClose={() => {
+                      // 通知Excalidraw弹框已关闭
+                      excalidrawRef.current?.clearSelection()
+                    }}
                     />
             )}
           </div>
+
+          {/* 3D模型弹框 */}
+          {show3DModal && current3DModel && (
+            <div className="modal-overlay" onClick={() => {
+              console.log('点击遮罩层，关闭弹框')
+              setShow3DModal(false)
+              setCurrent3DModel(null)
+              // 清除选中状态，防止立即重新打开
+              excalidrawRef.current?.clearSelection()
+              onModalClose?.()
+            }}>
+              <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                <button 
+                  className="modal-close-btn"
+                  onClick={() => {
+                    console.log('点击关闭按钮，关闭弹框')
+                    setShow3DModal(false)
+                    setCurrent3DModel(null)
+                    // 清除选中状态，防止立即重新打开
+                    excalidrawRef.current?.clearSelection()
+                    onModalClose?.()
+                  }}
+                  title="关闭"
+                >
+                  <X size={24} />
+                </button>
+                <div className="modal-3d-viewer">
+                  <Model3DViewer 
+                    modelUrl={current3DModel.url} 
+                    format={current3DModel.format}
+                    mtlUrl={current3DModel.mtlUrl}
+                    textureUrl={current3DModel.textureUrl}
+                    width={800}
+                    height={600}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* 调试信息（开发时可见） */}
+          {process.env.NODE_ENV === 'development' && (
+            <div style={{ 
+              position: 'fixed', 
+              bottom: '10px', 
+              right: '10px', 
+              background: 'rgba(0,0,0,0.7)', 
+              color: 'white', 
+              padding: '10px', 
+              fontSize: '12px',
+              zIndex: 9999,
+              borderRadius: '4px'
+            }}>
+              <div>show3DModal: {show3DModal ? 'true' : 'false'}</div>
+              <div>current3DModel: {current3DModel ? JSON.stringify(current3DModel) : 'null'}</div>
+            </div>
+          )}
           
           {chatPanelCollapsed && (
             <button 
