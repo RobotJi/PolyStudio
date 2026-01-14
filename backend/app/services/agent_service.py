@@ -5,44 +5,20 @@ import json
 import os
 import logging
 from typing import List, Dict, Any, AsyncGenerator, Optional
-from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from app.services.stream_processor import StreamProcessor
 from app.tools.volcano_image_generation import generate_volcano_image_tool, edit_volcano_image_tool
 from app.tools.model_3d_generation import generate_3d_model_tool
+from app.llm.factory import create_llm
 
 # 使用统一的日志配置
 logger = logging.getLogger(__name__)
 
-# 从环境变量获取配置
-# 注意：不要在代码里写死任何真实 API Key。未配置时直接报错提示用户设置 .env。
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1").strip()
-MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-ai/DeepSeek-V3.1-Terminus").strip()
-
 
 def create_agent():
     """创建LangGraph Agent"""
-    if not OPENAI_API_KEY:
-        raise RuntimeError(
-            "未配置 OPENAI_API_KEY。请在 backend/.env 中设置，"
-            "可参考 env.example（cp env.example .env）。"
-        )
-    logger.info(f"🤖 创建Agent: model={MODEL_NAME}, base_url={OPENAI_BASE_URL}")
-    
-    # 创建OpenAI模型实例（使用SiliconFlow）
-    # 关键：streaming=True 确保真正的流式输出
-    model = ChatOpenAI(
-        model=MODEL_NAME,
-        api_key=OPENAI_API_KEY,
-        base_url=OPENAI_BASE_URL,
-        temperature=0.7,
-        streaming=True,  # 启用流式输出
-        max_tokens=2048,
-        # 关键：禁止并行工具调用，强制“一次调用一个工具 -> 等结果 -> 再下一次”
-        # 否则模型可能在一次响应里吐出一堆 generate_image tool_calls，前端只能“挤在一起”展示。
-        model_kwargs={"parallel_tool_calls": False},
-    )
+    # 使用 LLM 工厂创建模型实例（默认使用火山引擎）
+    model = create_llm()
 
     # 创建工具列表
     tools = [
