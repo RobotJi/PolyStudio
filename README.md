@@ -87,13 +87,16 @@ cp env.example .env
 ```
 
 **必需的环境变量：**
-- `OPENAI_API_KEY`：LLM API 密钥（用于对话模型）
-- `VOLCANO_API_KEY`：火山引擎 API 密钥（用于图片生成和视频生成）
+- `OPENAI_API_KEY`：LLM API 密钥（用于对话模型，当 `LLM_PROVIDER=siliconflow` 时使用）
+- `VOLCANO_API_KEY`：火山引擎 API 密钥（用于图片生成、视频生成和 LLM，必需）
 - `TENCENT_AI3D_API_KEY`：腾讯云混元生3D API 密钥（用于 3D 模型生成）
 
 **可选的环境变量：**
+- `LLM_PROVIDER`：LLM 提供商，可选值：`volcano`（默认）、`siliconflow`
+- `VOLCANO_VIDEO_MODEL`：火山引擎视频生成模型（默认：`doubao-seedance-1-5-pro`）
 - `MOCK_MODE`：设置为 `true` 启用 Mock 模式（调试用，不调用真实 API）
-- `LOG_LEVEL`：日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+  - 启用 Mock 模式时，必须同时配置 `MOCK_IMAGE_PATH`、`MOCK_VIDEO_PATH` 和 `MOCK_MODEL_PATH`
+- `LOG_LEVEL`：日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL，默认：INFO）
 
 3) 启动后端（推荐）：
 
@@ -170,17 +173,28 @@ data: [DONE]
 
 ### 技术栈/服务说明（以代码为准）
 
-- **LLM（对话模型）**：通过 `OPENAI_BASE_URL` 指向 OpenAI 兼容接口（默认 SiliconFlow），模型名由 `MODEL_NAME` 指定
+- **LLM（对话模型）**：支持两种提供商
+  - **火山引擎**（默认）：通过 `LLM_PROVIDER=volcano` 使用火山引擎 LLM，模型由 `VOLCANO_MODEL_NAME` 指定（默认：`doubao-seed-1-6-251015`）
+  - **SiliconFlow**：通过 `LLM_PROVIDER=siliconflow` 使用 SiliconFlow，通过 `OPENAI_BASE_URL` 指向 OpenAI 兼容接口，模型名由 `MODEL_NAME` 指定
 - **图像生成/编辑**：后端 `generate_volcano_image` / `edit_volcano_image` 工具调用火山引擎 Seedream API（并将结果下载保存到本地 `/storage/images`）
 - **视频生成**：后端 `generate_volcano_video` 工具调用火山引擎 Seedance API
   - 使用模型：`doubao-seedance-1-5-pro`（Seedance 1.5 Pro，支持文生视频、图生视频-首帧、首尾帧三种模式）
-  - 生成的视频保存到本地 `/storage/videos`
-  - 支持三种生成模式：文生视频、图生视频-首帧、首尾帧
-  - 支持图片 URL 和本地路径输入（本地路径如 `/storage/images/xxx.jpg` 会自动转换为 base64）
+  - 生成的视频保存到本地 `/storage/videos`，文件名格式：`volcano_{timestamp}_{uuid}_{prompt}.mp4`
+  - 支持三种生成模式：
+    - **文生视频**（`mode="text"`）：基于文本描述生成视频
+    - **图生视频-首帧**（`mode="image"`）：基于首帧图片生成视频
+    - **首尾帧**（`mode="start_end"`）：基于首帧和尾帧图片生成过渡视频
+  - 支持图片 URL 和本地路径输入：
+    - 本地路径（如 `/storage/images/xxx.jpg`）会自动转换为 base64
+    - localhost URL（如 `http://localhost:8000/storage/images/xxx.jpg`）也会自动转换为 base64
+    - 公网 URL 直接使用
+  - 支持自定义视频参数：时长（4-12秒，默认5秒）、宽高比（默认 "16:9"）
 - **3D 模型生成**：后端 `generate_3d_model` 工具调用腾讯云混元生3D API，支持文生3D、图生3D和混合模式，生成的模型保存到本地 `/storage/models/`
 - **颜色一致性**：后端保存图片时会尝试做 sRGB 归一化（依赖 `Pillow`，已在 `requirements.txt` 固定）
 - **日志系统**：统一的日志配置，支持输出到控制台和文件（`backend/logs/`），可按日期和大小自动轮转
 - **Mock 模式**：支持启用 Mock 模式用于调试，返回固定的图片、视频和 3D 模型数据，无需调用真实 API
+  - 启用方式：在 `.env` 中设置 `MOCK_MODE=true`
+  - 必须配置：`MOCK_IMAGE_PATH`、`MOCK_VIDEO_PATH`、`MOCK_MODEL_PATH`（分别指向 `/storage/` 下的实际文件路径）
 
 ### 常见问题（简版）
 
