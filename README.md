@@ -27,6 +27,14 @@
   - 3D 模型保存到 `backend/storage/models/`（包含 OBJ、MTL、纹理文件）
   - 项目与聊天记录保存到 `backend/storage/chat_history.json`
 
+### 更新日志（重点功能，一行一句）
+
+- 🆕 新增视频拼接工具 `concatenate_videos`，支持多片段合成长视频（moviepy 2.x 兼容）。
+- 🆕 Prompt 增强长视频工作流：分镜生成 → 生图 → 图生视频 → 拼接 → 质检。
+- 视频工具支持本地/公网/localhost 路径自动处理（含 base64 转换与下载）。
+- 3D/图片/视频工具统一 Mock 模式，便于离线或调试。
+- SSE 流式输出优化，实时推送 delta、工具调用与结果。
+
 ### 目录结构
 
 ```

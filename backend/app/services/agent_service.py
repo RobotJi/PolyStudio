@@ -10,6 +10,7 @@ from app.services.stream_processor import StreamProcessor
 from app.tools.volcano_image_generation import generate_volcano_image_tool, edit_volcano_image_tool
 from app.tools.model_3d_generation import generate_3d_model_tool
 from app.tools.volcano_video_generation import generate_volcano_video_tool
+from app.tools.video_concatenation import concatenate_videos_tool
 from app.llm.factory import create_llm
 
 # 使用统一的日志配置
@@ -29,6 +30,7 @@ def create_agent():
         edit_volcano_image_tool,
         generate_3d_model_tool,
         generate_volcano_video_tool,
+        concatenate_videos_tool,
     ]
     logger.info(f"🛠️  注册工具: {[tool.name for tool in tools]}")
 
@@ -76,6 +78,60 @@ def create_agent():
 5.如果工具调用失败：检查错误信息，理解失败原因，然后重试或向用户说明情况。
 6.如果缺少必要信息：优先从对话历史中查找，如果确实找不到，再向用户询问。
 </工具调用规则>
+
+<长视频生成工作流>
+当用户要求生成超过单个视频片段时长限制（通常为4-12秒）的长视频时，按以下通用工作流执行：
+
+1. **需求分析**：理解用户需求，确定视频总时长、主题、风格、目标受众等关键信息。
+
+2. **分镜生成**：基于需求生成详细的分镜脚本
+   - **必须步骤**：在调用任何工具之前，先输出完整的分镜脚本
+   - 分镜脚本应包含：
+     * 镜头序号和时长（如：镜头1：5秒）
+     * 每个镜头的详细场景描述（包含视觉元素、动作、情绪等）
+     * 镜头之间的转场关系（确保故事连贯）
+     * 整体风格和色调要求
+   - 输出格式示例：
+     ```
+     我将为您生成一个30秒的[主题]视频，分镜如下：
+     
+     镜头1（5秒）：[详细场景描述，包含视觉元素、动作、情绪]
+     镜头2（5秒）：[详细场景描述]
+     ...
+     镜头6（5秒）：[详细场景描述]
+     
+     整体风格：[统一风格描述]
+     ```
+   - **重要**：分镜生成是必须的，不能跳过。只有在生成分镜后，才能开始执行后续步骤。
+
+3. **生成图片序列**：基于分镜脚本，为每个镜头生成对应的首帧图片
+   - 使用 generate_volcano_image 工具
+   - 每个图片的提示词应基于对应镜头的场景描述，并保持风格一致性
+   - 确保图片风格一致（相同主题、相似色调、统一尺寸）
+   - 记录每个图片的路径，用于后续视频生成
+
+4. **生成视频片段**：基于图片和分镜描述生成视频片段
+   - 使用 generate_volcano_video 工具，mode="image"
+   - 每个片段的提示词应结合分镜描述和图片内容
+   - 每个片段时长根据分镜脚本确定（确保总和不超过总时长）
+   - 记录每个视频片段的路径
+
+5. **拼接视频**：将所有片段按分镜顺序拼接为完整视频
+   - 使用 concatenate_videos 工具（如果该工具可用）
+   - 确保视频顺序严格按照分镜脚本的顺序
+   - 验证最终视频时长是否符合用户要求
+
+6. **质量检查**：检查最终视频是否符合分镜脚本和用户要求，如有问题可重新生成部分片段。
+
+**执行原则**：
+- **分镜优先**：必须先完成分镜生成，再执行工具调用
+- **分镜质量**：分镜脚本应详细、连贯、符合用户需求
+- **严格按分镜执行**：后续所有步骤都应严格按照分镜脚本执行
+- 如果用户没有明确指定时长，默认生成5-10秒的短视频
+- 如果用户要求超过60秒，建议拆分为多个视频或询问用户是否接受分段生成
+- 保持所有片段的宽高比一致（建议使用16:9）
+- 在生成过程中，可以通过SSE流式输出告知用户当前进度（如："正在生成镜头1的图片..."）
+</长视频生成工作流>
 
 <沟通规范>
 与用户沟通时，遵循以下原则：
