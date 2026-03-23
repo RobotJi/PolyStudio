@@ -70,6 +70,8 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
   const abortControllerRef = useRef<AbortController | null>(null) // 用于取消请求
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null) // 保存reader引用，用于暂停时关闭
   const isPausedRef = useRef<boolean>(false) // 使用ref确保能立即检查暂停状态
+  const isLoadingRef = useRef<boolean>(false) // 跟踪 isLoading 状态，供 WebSocket 事件处理器读取
+  const wsExternalActiveRef = useRef<boolean>(false) // 跟踪是否有外部 WebSocket 驱动的流正在进行
   // 注意：为了实现"生成一次展示一次"的节奏，我们不再把所有工具调用塞进同一条 assistant 消息里。
   // delta 会写入最近的纯文本 assistant 消息；tool_call 会创建独立的 step 消息；tool_result 只更新对应 step。
   
@@ -373,6 +375,179 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
   useEffect(() => {
     scrollToBottom('auto')
   }, [messages])
+
+  // 同步 isLoading 到 ref，供 WebSocket 事件处理器读取
+  useEffect(() => {
+    isLoadingRef.current = isLoading
+  }, [isLoading])
+
+  // WebSocket 连接：订阅当前画布的实时事件
+  // 当 Postman 等外部客户端发送带 canvas_id 的请求时，前端会实时收到消息更新
+  useEffect(() => {
+    if (!currentCanvasId) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.hostname
+    const ws = new WebSocket(`${protocol}//${host}:8000/ws/${currentCanvasId}`)
+
+    const appendDeltaExternal = (deltaText: string) => {
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last && last.role === 'assistant' && (!last.toolCalls || last.toolCalls.length === 0)) {
+          next[next.length - 1] = { ...last, content: (last.content || '') + deltaText }
+          return next
+        }
+        next.push({ role: 'assistant', content: deltaText })
+        return next
+      })
+    }
+
+    const appendToolStepExternal = (toolCall: ToolCall) => {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '', toolCalls: [toolCall] },
+      ])
+    }
+
+    const updateToolStepExternal = (toolCallId: string, updater: (tc: ToolCall) => ToolCall) => {
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (!m.toolCalls) return m
+          if (!m.toolCalls.some((tc) => tc.id === toolCallId)) return m
+          return { ...m, toolCalls: m.toolCalls.map((tc) => (tc.id === toolCallId ? updater(tc) : tc)) }
+        })
+      )
+    }
+
+    ws.onmessage = (e) => {
+      // 防重复：前端自己正在发起 SSE 请求时，忽略 WebSocket 消息
+      // wsExternalActiveRef 为 true 时表示是外部请求驱动的，不应忽略
+      if (isLoadingRef.current && !wsExternalActiveRef.current) return
+
+      try {
+        const event = JSON.parse(e.data)
+
+        switch (event.type) {
+          case 'user_message':
+            wsExternalActiveRef.current = true
+            isLoadingRef.current = true
+            setMessages((prev) => [...prev, { role: 'user', content: event.content }])
+            setIsLoading(true)
+            break
+
+          case 'delta':
+            if (event.content) {
+              appendDeltaExternal(event.content)
+              setTimeout(() => scrollToBottom('auto'), 0)
+            }
+            break
+
+          case 'tool_call':
+            appendToolStepExternal({
+              id: event.id,
+              name: event.name,
+              arguments: sanitizeArguments(event.arguments),
+              status: 'executing',
+            })
+            break
+
+          case 'tool_result':
+            updateToolStepExternal(event.tool_call_id, (tc) => {
+              let updatedArgs = tc.arguments
+              let imageUrl: string | undefined = tc.imageUrl
+              let videoUrl: string | undefined = tc.videoUrl
+              let modelUrl: string | undefined = tc.modelUrl
+              let modelFormat: 'obj' | 'glb' | undefined = tc.modelFormat
+              let audioUrl: string | undefined = tc.audioUrl
+              try {
+                const resultObj = JSON.parse(event.content)
+                if (resultObj && resultObj.prompt && (!updatedArgs || Object.keys(updatedArgs).length === 0)) {
+                  updatedArgs = { prompt: resultObj.prompt }
+                }
+                if (resultObj && typeof resultObj.image_url === 'string') imageUrl = resultObj.image_url
+                if (resultObj) videoUrl = resultObj.video_url || resultObj.video_path
+                if (resultObj && typeof resultObj.model_url === 'string') {
+                  modelUrl = resultObj.model_url
+                  modelFormat = (resultObj.format || 'obj') as 'obj' | 'glb'
+                }
+                if (resultObj && typeof resultObj.audio_url === 'string') audioUrl = resultObj.audio_url
+              } catch (_) { /* ignore */ }
+
+              let sanitizedResult = event.content
+              try {
+                sanitizedResult = JSON.stringify(sanitizeArguments(JSON.parse(event.content)))
+              } catch (_) { /* ignore */ }
+
+              // 处理画布插入（图片/视频/3D模型）
+              try {
+                const result = JSON.parse(event.content)
+                if (typeof result.image_url === 'string' && result.image_url) {
+                  excalidrawRef.current?.addImage({ url: result.image_url })
+                }
+                const vUrl = result.video_url || result.video_path
+                if (typeof vUrl === 'string' && vUrl) {
+                  excalidrawRef.current?.addVideo({ videoUrl: vUrl })
+                }
+                if (typeof result.model_url === 'string' && result.model_url) {
+                  excalidrawRef.current?.add3DModelPreview({
+                    previewUrl: result.preview_url || result.model_url,
+                    modelUrl: result.model_url,
+                    format: (result.format || 'obj') as 'obj' | 'glb',
+                    mtlUrl: result.mtl_url,
+                    textureUrl: result.texture_url,
+                  })
+                }
+              } catch (_) { /* ignore */ }
+
+              return {
+                ...tc,
+                status: 'done' as const,
+                result: sanitizedResult,
+                arguments: sanitizeArguments(updatedArgs),
+                imageUrl,
+                videoUrl,
+                modelUrl,
+                modelFormat,
+                audioUrl,
+              }
+            })
+            break
+
+          case 'done':
+            wsExternalActiveRef.current = false
+            isLoadingRef.current = false
+            setIsLoading(false)
+            scrollToBottom('smooth')
+            break
+
+          case 'error':
+            setMessages((prev) => {
+              const next = [...prev]
+              const last = next[next.length - 1]
+              if (last && last.role === 'assistant') {
+                last.content = `错误: ${event.error}`
+              }
+              return next
+            })
+            wsExternalActiveRef.current = false
+            isLoadingRef.current = false
+            setIsLoading(false)
+            break
+        }
+      } catch (err) {
+        console.error('WebSocket 消息解析失败:', err)
+      }
+    }
+
+    ws.onerror = (err) => {
+      console.error('WebSocket 连接错误:', err)
+    }
+
+    return () => {
+      ws.close()
+    }
+  }, [currentCanvasId])
 
   const sendMessage = async (userMessage: string, skipAddUserMessage = false, userMessageObj?: Message) => {
     const trimmed = (userMessage || '').trim()

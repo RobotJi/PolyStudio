@@ -8,10 +8,15 @@ from typing import List, Dict, Any, Optional
 import json
 import os
 import uuid
+import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from app.services.agent_service import process_chat_stream
 from app.services.history_service import history_service
+from app.services.connection_manager import manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -20,6 +25,7 @@ class ChatRequest(BaseModel):
     message: str
     messages: Optional[List[Dict[str, Any]]] = []
     session_id: Optional[str] = None
+    canvas_id: Optional[str] = None
 
 
 @router.get("/canvases")
@@ -161,11 +167,14 @@ async def upload_audio(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
 
 
+
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """
     处理聊天请求，返回流式响应
     支持OpenAI格式的流式输出
+    若请求包含 canvas_id，同时将每个 SSE 事件广播给订阅该 canvas 的 WebSocket 客户端
     """
     try:
         # 构建消息历史
@@ -175,9 +184,63 @@ async def chat(request: ChatRequest):
             "content": request.message
         })
 
+        canvas_id = request.canvas_id
+
+        async def stream_and_save():
+            assistant_content = ""
+
+            # 广播用户消息给前端（await 直接调用，不用 create_task）
+            user_event = json.dumps({"type": "user_message", "content": request.message}, ensure_ascii=False)
+            if canvas_id:
+                await manager.broadcast(canvas_id, user_event)
+            else:
+                await manager.broadcast_all(user_event)
+
+            async for chunk in process_chat_stream(messages, request.session_id):
+                yield chunk
+                if chunk.startswith("data: "):
+                    data_str = chunk[len("data: "):].strip()
+                    if data_str and data_str != "[DONE]":
+                        # 广播给前端
+                        if canvas_id:
+                            await manager.broadcast(canvas_id, data_str)
+                        else:
+                            await manager.broadcast_all(data_str)
+                        # 收集 assistant 内容
+                        try:
+                            ev = json.loads(data_str)
+                            if ev.get("type") == "delta" and ev.get("content"):
+                                assistant_content += ev["content"]
+                        except Exception:
+                            pass
+                    elif data_str == "[DONE]":
+                        done_event = json.dumps({"type": "done"}, ensure_ascii=False)
+                        if canvas_id:
+                            await manager.broadcast(canvas_id, done_event)
+                        else:
+                            await manager.broadcast_all(done_event)
+
+            # 流结束后保存历史
+            try:
+                import time
+                ts = int(time.time() * 1000)
+                new_canvas = {
+                    "id": f"canvas-{ts}",
+                    "name": request.message[:30],
+                    "createdAt": ts,
+                    "messages": [
+                        {"role": "user", "content": request.message},
+                        {"role": "assistant", "content": assistant_content},
+                    ],
+                    "data": {"elements": [], "appState": {}, "files": {}},
+                }
+                await asyncio.to_thread(history_service.save_canvas, new_canvas)
+            except Exception as e:
+                logger.warning(f"保存对话历史失败: {e}")
+
         # 返回流式响应 - 确保立即发送，不缓冲
         return StreamingResponse(
-            process_chat_stream(messages, request.session_id),
+            stream_and_save(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
