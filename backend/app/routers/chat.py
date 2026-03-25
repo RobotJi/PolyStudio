@@ -161,6 +161,53 @@ async def upload_audio(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
 
 
+@router.post("/upload-video")
+async def upload_video(file: UploadFile = File(...)):
+    """
+    上传视频到 storage/videos 目录
+    支持的格式：mp4, mov, avi, mkv, webm
+
+    Returns:
+        上传后的视频URL（相对路径，如 /storage/videos/xxx.mp4）
+    """
+    try:
+        BASE_DIR = Path(__file__).parent.parent.parent
+        VIDEOS_DIR = BASE_DIR / "storage" / "videos"
+        VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+
+        content_type = file.content_type or ""
+        original_filename = file.filename or "video"
+        ext = os.path.splitext(original_filename)[1].lower()
+        allowed_extensions = [".mp4", ".mov", ".avi", ".mkv", ".webm"]
+
+        is_video = content_type.startswith("video/") or content_type == "application/octet-stream"
+        if not is_video and ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"只支持视频文件，支持的格式：{', '.join(allowed_extensions)}"
+            )
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        if not ext or ext not in allowed_extensions:
+            ext = ".mp4"
+
+        filename = f"upload_{timestamp}_{unique_id}{ext}"
+        file_path = VIDEOS_DIR / filename
+
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        video_url = f"/storage/videos/{filename}"
+        return {"url": video_url, "filename": filename}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
+
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """

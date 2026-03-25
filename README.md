@@ -2,12 +2,14 @@
 
 [Python 3.9+](https://www.python.org/downloads/) | [Node.js 18+](https://nodejs.org/) | [License: MIT](https://opensource.org/licenses/MIT)
 
-PolyStudio 是一个对话式多模态内容生成平台，将语言模型与专业工具（如图片生成、视频生成、3D 模型生成）相结合，通过自然语言对话即可生成和管理多媒体内容。项目采用 FastAPI + LangGraph 构建智能 Agent 编排系统，提供无限画板承载与项目管理，支持 SSE 流式输出、自动内容插入、项目链接分享等功能。
+PolyStudio 是一个对话式多模态内容生成平台，将语言模型与专业工具（如图片生成、视频生成、3D 模型生成、多模态内容理解）相结合，通过自然语言对话即可生成、分析和管理多媒体内容。项目采用 FastAPI + LangGraph 构建智能 Agent 编排系统，提供无限画板承载与项目管理，支持 SSE 流式输出、自动内容插入、项目链接分享等功能。
 
 PolyStudio 支持灵活的 API 接入，你可以轻松替换为任意图片、视频、3D 生成服务，打造属于自己的多模态创作工具。
 
 ### 功能概览
 
+- **多模态内容理解**：基于 Qwen3-Omni-Flash，支持图片/音频/视频智能分析，文字+语音双模态输出，支持「理解 → 创作」联动 🆕
+- **视频上传与管理**：前端支持视频文件上传（MP4/MOV/AVI/MKV/WEBM），在对话中可视化展示，保存到本地 🆕
 - **智能播客生成**：从脚本创作到混音输出的完整音频内容生成工作流 🆕
   - 支持播客、有声书、广播剧等多种音频场景
   - 基于文本描述或参考音频的 AI 语音合成（Qwen-TTS）
@@ -82,6 +84,7 @@ PolyStudio/
 │   ├── app/                 # 业务代码
 │   │   ├── tools/           # 工具模块
 │   │   │   ├── qwen_tts.py          # Qwen-TTS 语音合成（声音设计、声音复刻）🆕
+│   │   │   ├── qwen_omni_understanding.py # Qwen3-Omni 多模态理解（图片/音频/视频）🆕
 │   │   │   ├── audio_mixing.py     # 音频混音工具（拼接、BGM、混音）🆕
 │   │   │   ├── volcano_image_generation.py  # 图片生成/编辑
 │   │   │   ├── volcano_video_generation.py  # 视频生成
@@ -153,8 +156,8 @@ cp env.example .env
 - 图片/视频生成 API 密钥（根据你使用的 API 提供商配置，如 `VOLCANO_API_KEY` 等）
 - 3D 模型生成 API 密钥（根据你使用的 API 提供商配置，如 `TENCENT_AI3D_API_KEY` 等）
 
-**TTS语音合成配置（播客生成）：** 🆕
-- `DASHSCOPE_API_KEY`：阿里云百炼 API 密钥（用于 Qwen-TTS 语音合成）
+**TTS语音合成 & 多模态理解配置：** 🆕
+- `DASHSCOPE_API_KEY`：阿里云百炼 API 密钥（用于 Qwen-TTS 语音合成 + Qwen3-Omni 多模态理解）
 - `DASHSCOPE_BASE_URL`：API 地址，国内版：`https://dashscope.aliyuncs.com`
 
 **虚拟人生成配置（可选）：**
@@ -232,6 +235,8 @@ Agent 会根据播客主题智能匹配最合适的 BGM。
   - 轮询任务状态，生成完成后自动下载并保存到本地
   - Mock 模式支持，便于调试
 - **音频处理**：支持前端上传音频文件（MP3/WAV/M4A/AAC/OGG/FLAC/WMA），保存到 `backend/storage/audios/`，在对话中可视化展示
+- **视频上传**：支持前端上传视频文件（MP4/MOV/AVI/MKV/WEBM），保存到 `backend/storage/videos/`，在对话中可视化展示 🆕
+- **多模态理解**：基于 Qwen3-Omni-Flash，支持图片/音频/视频智能分析，文字+语音双模态输出 🆕
 - **颜色一致性**：后端保存图片时会尝试做 sRGB 归一化（依赖 `Pillow`，已在 `requirements.txt` 固定）
 - **日志系统**：统一的日志配置，支持输出到控制台和文件（`backend/logs/`），可按日期和大小自动轮转
 - **Mock 模式**：支持启用 Mock 模式用于调试，返回固定的图片、视频、3D 模型和虚拟人数据，无需调用真实 API
