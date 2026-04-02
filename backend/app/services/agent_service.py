@@ -16,11 +16,8 @@ from app.tools.video_concatenation import concatenate_videos_tool
 from app.tools.virtual_anchor_generation import detect_face_tool, generate_virtual_anchor_tool
 from app.tools.qwen_tts import qwen_voice_design_tool, qwen_voice_cloning_tool
 from app.tools.audio_mixing import concatenate_audio_tool, select_bgm_tool, mix_audio_with_bgm_tool
-<<<<<<< HEAD
 from app.tools.qwen_omni_understanding import qwen_omni_understand_tool
-=======
 from app.tools.skill_tools import read_skill_file_tool, list_skill_dir_tool
->>>>>>> feature/skills-in
 from app.llm.factory import create_llm
 
 # 使用统一的日志配置
@@ -50,14 +47,12 @@ def create_agent():
         concatenate_audio_tool,
         select_bgm_tool,
         mix_audio_with_bgm_tool,
-<<<<<<< HEAD
         # Qwen3-Omni 多模态理解工具
         qwen_omni_understand_tool,
-=======
         # Skill 文件读取工具（Progressive Loading）
         read_skill_file_tool,
         list_skill_dir_tool,
->>>>>>> feature/skills-in
+        
     ]
     logger.info(f"🛠️  注册工具: {[tool.name for tool in tools]}")
 
