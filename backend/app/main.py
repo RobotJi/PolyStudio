@@ -2,14 +2,15 @@
 PolyStudio后端主程序
 使用FastAPI + LangGraph实现
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from app.routers import chat
+from app.routers import chat, settings
 import os
 from dotenv import load_dotenv
 from app.utils.logger import setup_logging
+from app.services.connection_manager import manager
 
 load_dotenv()
 
@@ -47,6 +48,23 @@ if STORAGE_DIR.exists():
 
 # 注册路由
 app.include_router(chat.router, prefix="/api", tags=["chat"])
+app.include_router(settings.router, prefix="/api", tags=["settings"])
+
+
+@app.websocket("/ws/{canvas_id}")
+async def websocket_endpoint(websocket: WebSocket, canvas_id: str):
+    """
+    WebSocket 端点：前端订阅某个 canvas 的实时事件
+    URL: ws://localhost:8000/ws/{canvas_id}
+    当 Postman 等外部客户端向 /api/chat 发送带 canvas_id 的请求时，
+    事件会同时广播给所有订阅该 canvas_id 的 WebSocket 连接
+    """
+    await manager.connect(canvas_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(canvas_id, websocket)
 
 
 @app.get("/")
